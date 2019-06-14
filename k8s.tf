@@ -56,7 +56,8 @@ resource "openstack_compute_instance_v2" "k8s-master" {
   image_id  = "${var.image_id}"
   flavor_name = "${var.master_flavor_name}"
   key_pair  = "${openstack_compute_keypair_v2.cluster-keypair.name}"
-  security_groups = ["${openstack_compute_secgroup_v2.secgroup_k8s.name}"]
+  #security_groups = ["${openstack_compute_secgroup_v2.secgroup_k8s.name}"]
+  security_groups = ["default"]
   network {
     name = "${var.network_name}"
     access_network = true
@@ -66,10 +67,6 @@ resource "openstack_compute_instance_v2" "k8s-master" {
   #  name = "infn-farm"
   #  access_network = true
   #}
-
-  provisioner "local-exec" {
-    command = "echo ${openstack_networking_floatingip_v2.floatingip_master.address} >> hosts.txt"
-  }
 
 
 }
@@ -93,11 +90,9 @@ resource "openstack_compute_instance_v2" "k8s-nodes" {
     name = "${var.network_name}"
   }
 
-  provisioner "local-exec" {
-    command = "echo ${self.access_ip_v4} >> hosts.txt"
-    
-  }
-
+  depends_on = [
+    openstack_compute_instance_v2.k8s-master
+    ]
 }
 
 #resource "openstack_compute_volume_attach_v2" "attachments" {
@@ -113,23 +108,23 @@ resource "openstack_networking_floatingip_v2" "floatingip_master" {
 
 resource "openstack_compute_floatingip_associate_v2" "floatingip_master" {
   count = 2
-  floating_ip = "${openstack_networking_floatingip_v2.floatingip_master.*.address}"
-  instance_id = "${openstack_compute_instance_v2.k8s-master.*.id}"
+  floating_ip = "${openstack_networking_floatingip_v2.floatingip_master.*.address[count.index]}"
+  instance_id = "${openstack_compute_instance_v2.k8s-master.*.id[count.index]}"
 }
 
 
-resource "null_resource" "cluster" {
+resource "null_resource" "cluster_setup" {
 
   triggers = {
-    floating_ip = "${openstack_compute_floatingip_associate_v2.floatingip_master.id}"
+    floating_ip = "${openstack_compute_floatingip_associate_v2.floatingip_master.0.id}"
   }
 
   provisioner "local-exec" {
-    command = "sleep 90 && scp -o \"StrictHostKeyChecking no\" -i key key ubuntu@${openstack_networking_floatingip_v2.floatingip_master.address}:~/.ssh/id_rsa"
+    command = "sleep 90 && scp -o \"StrictHostKeyChecking no\" -i key key ubuntu@${openstack_networking_floatingip_v2.floatingip_master.0.address}:~/.ssh/id_rsa"
   }
 
   provisioner "local-exec" {
-    command = "scp -o \"StrictHostKeyChecking no\" -i key key.pub ubuntu@${openstack_networking_floatingip_v2.floatingip_master.address}:~/.ssh/id_rsa.pub"
+    command = "scp -o \"StrictHostKeyChecking no\" -i key key.pub ubuntu@${openstack_networking_floatingip_v2.floatingip_master.0.address}:~/.ssh/id_rsa.pub"
   }
 
   provisioner "file" {
@@ -138,29 +133,36 @@ resource "null_resource" "cluster" {
     connection {
       type     = "ssh"
       user     = "ubuntu"
-      host = "${openstack_networking_floatingip_v2.floatingip_master.address}"
+      host = "${openstack_networking_floatingip_v2.floatingip_master.0.address}"
       private_key = "${file("key")}"
     }
+  }
+}
+
+resource "null_resource" "install" {
+
+    triggers = {
+    floating_ip = "${null_resource.cluster_setup.id}"
   }
 
   provisioner "remote-exec" {
     inline = [
       "chmod +x /tmp/install.sh",
       "chmod 600 ~/.ssh/id_rsa",
-      "export HOSTS=\"(${openstack_compute_instance_v2.k8s-master.access_ip_v4} ${join(" ", openstack_compute_instance_v2.k8s-nodes[*].access_ip_v4)})\"",
+      "export HOSTS=\"(${join(" ",openstack_compute_instance_v2.k8s-master[*].access_ip_v4)} ${join(" ", openstack_compute_instance_v2.k8s-nodes[*].access_ip_v4)})\"",
       "/tmp/install.sh"
     ]
     connection {
       type     = "ssh"
       user     = "ubuntu"
-      host = "${openstack_networking_floatingip_v2.floatingip_master.address}"
+      host = "${openstack_networking_floatingip_v2.floatingip_master.0.address}"
       private_key = "${file("key")}"
   }
   }
 }
 
 output "master_ips" {
-  value = ["${openstack_networking_floatingip_v2.floatingip_master.address}"]
+  value = ["${openstack_networking_floatingip_v2.floatingip_master[*].address}"]
 }
 
 output "node_ips" {
@@ -168,5 +170,5 @@ output "node_ips" {
 }
 
 output "dashboard_url" {
-  value = ["https://${openstack_networking_floatingip_v2.floatingip_master.address}:6443/api/v1/namespaces/kube-system/services/https:kubernetes-dashboard:/proxy/#!/login"]
+  value = ["https://${openstack_networking_floatingip_v2.floatingip_master.0.address}:6443/api/v1/namespaces/kube-system/services/https:kubernetes-dashboard:/proxy/#!/login"]
 }
