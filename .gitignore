@@ -1,0 +1,5 @@
+*.tfstate*
+.terraform
+openrc*
+key*
+hosts.txt
