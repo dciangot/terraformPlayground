@@ -16,5 +16,3 @@ declare -a IPS=$HOSTS
 
 echo $IPS
 CONFIG_FILE=inventory/mycluster/hosts.yml python3 contrib/inventory_builder/inventory.py ${IPS[@]}
-
-ansible-playbook -i inventory/mycluster/hosts.yml --become --become-user=root --extra-vars ansible_user=ubuntu --extra-vars kube_network_plugin=flannel cluster.yml

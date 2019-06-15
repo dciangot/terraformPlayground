@@ -1,0 +1,15 @@
+---
+- hosts: kube-node
+  tasks:
+  - parted:
+      device: /dev/vdc
+      number: 1
+      state: present
+  - filesystem:
+      fstype: xfs
+      dev: /dev/vdc1
+  - mount:
+      path: /mnt/xrd
+      src: /dev/vdc1 
+      fstype: xfs
+      state: mounted
