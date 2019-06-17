@@ -13,3 +13,9 @@
       src: /dev/vdc1 
       fstype: xfs
       state: mounted
+  - file:
+      path: /etc/foo
+      state: directory
+      recurse: yes
+      owner: 998
+      group: 996

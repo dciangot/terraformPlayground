@@ -9,34 +9,48 @@
 # TODO: use modules
 variable "priv_network_name"{
   default = "net"
+  #default = "private_net"
 }
 
 variable "pub_network_name"{
   default = "infn-farm"
+  #default = "public_net"
 }
 
 variable "master_image_id" {
   default = "cb87a2ac-5469-4bd5-9cce-9682c798b4e4"
+  #default = "8f667fbc-40bf-45b8-b22d-40f05b48d060"
 }
 
 variable "slave_image_id" {
   default = "d9a41aed-3ebf-42f9-992e-ef0078d3de95"
+  #default = "8f667fbc-40bf-45b8-b22d-40f05b48d060"
 }
 
 variable "master_flavor_name" {
-  default = "m1.medium"
+  default = "m1.large"
+  #default = "2cpu-4GB.dodas"
 }
 
 variable "slave_flavor_name" {
   default = "m1.large"
+  #default = "2cpu-4GB.dodas"
 }
 
 variable "n_slaves" {
-  default = 4
+  default = 2
+}
+
+variable "mount_volumes" {
+  default = 1
+}
+
+variable "n_external_volumes" {
+  default = 2
 }
 
 variable "volume_size" {
-  default = 5
+  default = 50
 }
 
 # GET keys previously generated
@@ -46,7 +60,7 @@ resource "openstack_compute_keypair_v2" "cluster-keypair" {
 }
 
 resource "openstack_blockstorage_volume_v2" "volumes" {
-  count = "${var.n_slaves}"
+  count = "${var.n_external_volumes}"
   name        = "cache-${count.index}"
   size        = "${var.volume_size}"
 }
@@ -72,6 +86,14 @@ resource "openstack_compute_secgroup_v2" "secgroup_k8s" {
   rule {
     from_port   = 6443
     to_port     = 6443
+    ip_protocol = "tcp"
+    cidr        = "0.0.0.0/0"
+  }
+
+
+  rule {
+    from_port   = 31394
+    to_port     = 31394
     ip_protocol = "tcp"
     cidr        = "0.0.0.0/0"
   }
@@ -114,10 +136,10 @@ resource "openstack_compute_instance_v2" "k8s-nodes" {
 }
 
 resource "openstack_compute_volume_attach_v2" "attachments" {
-  count       = "${var.n_slaves}"
-  instance_id = "${openstack_compute_instance_v2.k8s-nodes.*.id[count.index]}"
-  volume_id   = "${openstack_blockstorage_volume_v2.volumes.*.id[count.index]}"
-  device = "/dev/vdc"
+   count       = "${var.n_external_volumes}"
+   instance_id = "${openstack_compute_instance_v2.k8s-nodes.*.id[count.index]}"
+   volume_id   = "${openstack_blockstorage_volume_v2.volumes.*.id[count.index]}"
+   device = "/dev/vdc"
 }
 
 resource "openstack_compute_floatingip_associate_v2" "floatingip_master" {
@@ -127,6 +149,7 @@ resource "openstack_compute_floatingip_associate_v2" "floatingip_master" {
 }
 
 resource "null_resource" "mount_volumes" {
+  count = var.mount_volumes
   triggers = {
     attach = "${openstack_compute_volume_attach_v2.attachments.0.id}"
   }
@@ -145,6 +168,7 @@ resource "null_resource" "mount_volumes" {
 
   provisioner "remote-exec" {
     inline = [
+      "cd kubespray",
       "ansible-playbook -i inventory/mycluster/hosts.yml --become --become-user=root /tmp/mount.yaml"
     ]
     connection {
@@ -198,7 +222,7 @@ resource "null_resource" "install" {
     inline = [
       "chmod +x /tmp/install.sh",
       "chmod 600 ~/.ssh/id_rsa",
-      "export HOSTS=\"(${join(" ",openstack_compute_instance_v2.k8s-master[*].access_ip_v4)} ${join(" ", openstack_compute_instance_v2.k8s-nodes[*].access_ip_v4)})\"",
+      "export HOSTS=\"(${join(" ",openstack_compute_instance_v2.k8s-master[*].network.0.fixed_ip_v4)} ${join(" ", openstack_compute_instance_v2.k8s-nodes[*].access_ip_v4)})\"",
       "/tmp/install.sh"
     ]
     connection {
@@ -217,9 +241,26 @@ resource "null_resource" "ansible" {
     floating_ip = "${null_resource.install.id}"
   }
 
+  provisioner "file" {
+    source      = "config/vars.yaml"
+    destination = "/tmp/vars.yaml"
+    connection {
+      type     = "ssh"
+      user     = "ubuntu"
+      #host = "${openstack_networking_floatingip_v2.floatingip_master.0.address}"
+      host = "${openstack_compute_instance_v2.k8s-master.0.access_ip_v4}"
+      private_key = "${file("key")}"
+    }
+  }
+
   provisioner "remote-exec" {
     inline = [
-      "ansible-playbook -i inventory/mycluster/hosts.yml --become --become-user=root --extra-vars ansible_user=ubuntu --extra-vars kube_network_plugin=flannel cluster.yml"
+      "cd kubespray",
+      "ansible-playbook -i inventory/mycluster/hosts.yml --become --become-user=root --extra-vars \"@/tmp/vars.yaml\" cluster.yml",
+      "curl -L https://git.io/get_helm.sh | bash",
+      "sudo helm init --upgrade",
+      "sudo helm repo add cloudpg https://cloud-pg.github.io/CachingOnDemand/",
+      "sudo helm repo update"
     ]
     connection {
       type     = "ssh"
@@ -233,7 +274,7 @@ resource "null_resource" "ansible" {
 
 output "master_ips" {
   #value = ["${openstack_networking_floatingip_v2.floatingip_master[*].address}"]
-  value = ["${openstack_compute_instance_v2.k8s-master[*].access_ip_v4}"]
+  value = ["${openstack_compute_instance_v2.k8s-master[*].access_ip_v4}", "${openstack_compute_instance_v2.k8s-master[*].network.0.fixed_ip_v4}"]
 
 }
 

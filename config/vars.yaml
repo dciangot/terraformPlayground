@@ -1,0 +1,5 @@
+ansible_user: ubuntu
+
+apiserver_custom_flags:
+  - "--oidc-issuer-url=https://dodas-iam.cloud.cnaf.infn.it/"
+  - "--oidc-client-id=dodas-demo"
