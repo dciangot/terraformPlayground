@@ -1,10 +1,23 @@
-#provider "openstack" {
-#  user_name   = "${var.username}"
-#  password    = "${var.password}"
-#  tenant_name = "${var.tenant}"
-#  auth_url    = "http://openstack.fisica.unipg.it:5000/v3"
-#  region      = "RegionOne"
-#}
+# variable "os_username" {
+#   type = string
+# }
+
+# variable "os_password" {
+#   type = string
+# }
+
+# variable "os_tenant" {
+#   type = string
+# }
+
+
+# provider "openstack" {
+#   user_name   = var.os_username
+#   password    = var.os_password
+#   tenant_name = var.os_tenant
+#   auth_url    = "http://openstack.fisica.unipg.it:5000/v3"
+#   region      = "RegionOne"
+# }
 
 # TODO: use modules
 variable "priv_network_name"{
@@ -84,8 +97,8 @@ resource "openstack_compute_secgroup_v2" "secgroup_k8s" {
 
 
   rule {
-    from_port   = 6443
-    to_port     = 6443
+    from_port   = 30443
+    to_port     = 30443
     ip_protocol = "tcp"
     cidr        = "0.0.0.0/0"
   }
@@ -100,7 +113,7 @@ resource "openstack_compute_secgroup_v2" "secgroup_k8s" {
 }
 
 resource "openstack_compute_instance_v2" "k8s-master" {
-  count = 2
+  count = 1
   name      = "master-${count.index}"
   image_id  = "${var.master_image_id}"
   flavor_name = "${var.master_flavor_name}"
@@ -151,7 +164,8 @@ resource "openstack_compute_floatingip_associate_v2" "floatingip_master" {
 resource "null_resource" "mount_volumes" {
   count = var.mount_volumes
   triggers = {
-    attach = "${openstack_compute_volume_attach_v2.attachments.0.id}"
+    attach = "${openstack_compute_volume_attach_v2.attachments.0.id}",
+    ip = "${openstack_compute_instance_v2.k8s-master.0.access_ip_v4}"
   }
 
   provisioner "file" {
@@ -168,8 +182,7 @@ resource "null_resource" "mount_volumes" {
 
   provisioner "remote-exec" {
     inline = [
-      "cd kubespray",
-      "ansible-playbook -i inventory/mycluster/hosts.yml --become --become-user=root /tmp/mount.yaml"
+      "ansible-playbook -i hosts.ini --become --become-user=root /tmp/mount.yaml"
     ]
     connection {
       type     = "ssh"
@@ -190,12 +203,12 @@ resource "null_resource" "cluster_setup" {
 
   provisioner "local-exec" {
     #command = "sleep 90 && scp -o \"StrictHostKeyChecking no\" -i key key ubuntu@${openstack_networking_floatingip_v2.floatingip_master.0.address}:~/.ssh/id_rsa"
-    command = "sleep 90 && scp -o \"StrictHostKeyChecking no\" -i key key ubuntu@${openstack_compute_instance_v2.k8s-master.0.access_ip_v4}:~/.ssh/id_rsa"
+    command = "sleep 20 && scp -o \"StrictHostKeyChecking no\" -i key key ubuntu@${openstack_compute_instance_v2.k8s-master.0.access_ip_v4}:~/.ssh/id_rsa"
   }
 
   provisioner "local-exec" {
     #command = "scp -o \"StrictHostKeyChecking no\" -i key key.pub ubuntu@${openstack_networking_floatingip_v2.floatingip_master.0.address}:~/.ssh/id_rsa.pub"
-    command = "sleep 90 && scp -o \"StrictHostKeyChecking no\" -i key key ubuntu@${openstack_compute_instance_v2.k8s-master.0.access_ip_v4}:~/.ssh/id_rsa.pub"
+    command = "scp -o \"StrictHostKeyChecking no\" -i key key ubuntu@${openstack_compute_instance_v2.k8s-master.0.access_ip_v4}:~/.ssh/id_rsa.pub"
   }
 
   provisioner "file" {
@@ -214,7 +227,7 @@ resource "null_resource" "cluster_setup" {
 
 resource "null_resource" "install" {
 
-    triggers = {
+  triggers = {
     floating_ip = "${null_resource.cluster_setup.id}"
   }
 
@@ -222,7 +235,7 @@ resource "null_resource" "install" {
     inline = [
       "chmod +x /tmp/install.sh",
       "chmod 600 ~/.ssh/id_rsa",
-      "export HOSTS=\"(${join(" ",openstack_compute_instance_v2.k8s-master[*].network.0.fixed_ip_v4)} ${join(" ", openstack_compute_instance_v2.k8s-nodes[*].access_ip_v4)})\"",
+      "export HOSTS=\"${join("\n", openstack_compute_instance_v2.k8s-nodes[*].access_ip_v4)}\"",
       "/tmp/install.sh"
     ]
     connection {
@@ -253,14 +266,21 @@ resource "null_resource" "ansible" {
     }
   }
 
+  provisioner "file" {
+    source      = "tasks/k8s_master.yaml"
+    destination = "/tmp/cluster.yaml"
+    connection {
+      type     = "ssh"
+      user     = "ubuntu"
+      #host = "${openstack_networking_floatingip_v2.floatingip_master.0.address}"
+      host = "${openstack_compute_instance_v2.k8s-master.0.access_ip_v4}"
+      private_key = "${file("key")}"
+    }
+  }
+
   provisioner "remote-exec" {
     inline = [
-      "cd kubespray",
-      "ansible-playbook -i inventory/mycluster/hosts.yml --become --become-user=root --extra-vars \"@/tmp/vars.yaml\" cluster.yml",
-      "curl -L https://git.io/get_helm.sh | bash",
-      "sudo helm init --upgrade",
-      "sudo helm repo add cloudpg https://cloud-pg.github.io/CachingOnDemand/",
-      "sudo helm repo update"
+      "ansible-playbook --ssh-extra-args=\"-o StrictHostKeyChecking=no\"  -i hosts.ini --become --become-user=root --extra-vars \"@/tmp/vars.yaml\" --extra-vars kube_server=${openstack_compute_instance_v2.k8s-master.0.network.0.fixed_ip_v4} --extra-vars kube_api_server=${openstack_compute_instance_v2.k8s-master.0.network.0.fixed_ip_v4} /tmp/cluster.yaml",
     ]
     connection {
       type     = "ssh"
@@ -284,5 +304,5 @@ output "node_ips" {
 
 output "dashboard_url" {
   #value = ["https://${openstack_networking_floatingip_v2.floatingip_master.0.address}:6443/api/v1/namespaces/kube-system/services/https:kubernetes-dashboard:/proxy/#!/login"]
-  value = ["https://${openstack_compute_instance_v2.k8s-master.0.access_ip_v4}:6443/api/v1/namespaces/kube-system/services/https:kubernetes-dashboard:/proxy/#!/login"]
+  value = ["https://${openstack_compute_instance_v2.k8s-master.0.access_ip_v4}:30443"]
 }

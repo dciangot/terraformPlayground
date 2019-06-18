@@ -1,0 +1,13 @@
+---
+- hosts: localhost
+  tasks:
+  - file: path=/etc/kubernetes/pki state=directory mode=755 recurse=yes
+  - copy: content='{{kube_admin_token}},{{kube_admin_username}},100,"users,system:masters"' dest=/etc/kubernetes/pki/auth mode=600
+
+- hosts: localhost
+  roles:
+  - { role: 'indigo-dc.kubernetes'}
+
+- hosts: kube-node
+  roles:
+  - { role: 'indigo-dc.kubernetes', kube_type_of_node: 'wn'}

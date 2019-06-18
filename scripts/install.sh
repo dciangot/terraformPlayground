@@ -2,17 +2,15 @@
 sudo apt update 
 #&& sudo apt upgrade -y
 
-sudo apt install -y  build-essential python3 python3-pip python3-dev libffi-dev git
-sudo pip3 install --upgrade pip
+sudo apt install -y  build-essential python3 python3-pip python3-dev libffi-dev git 
 
-git clone https://github.com/kubernetes-sigs/kubespray.git
-cd kubespray
+sudo ln -s /usr/bin/python3 /usr/bin/python
 
-sudo pip3 install --upgrade cryptography
-sudo pip3 install -r requirements.txt
-cp -rfp inventory/sample inventory/mycluster
+sudo pip3 install ansible
 
-declare -a IPS=$HOSTS
+ansible-galaxy install indigo-dc.kubernetes
 
-echo $IPS
-CONFIG_FILE=inventory/mycluster/hosts.yml python3 contrib/inventory_builder/inventory.py ${IPS[@]}
+echo "[kube-node]" > hosts.ini
+
+echo -e $HOSTS >> hosts.ini
+

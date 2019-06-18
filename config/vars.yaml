@@ -1,5 +1,25 @@
 ansible_user: ubuntu
 
-apiserver_custom_flags:
-  - "--oidc-issuer-url=https://dodas-iam.cloud.cnaf.infn.it/"
-  - "--oidc-client-id=dodas-demo"
+# Version to install or latest
+kube_version: latest 
+
+# Security Token
+kube_admin_username: admin
+kube_admin_token: testme
+
+kube_apiserver_options:
+  - option: "--service-node-port-range"
+    value: "8000-35000"
+  - option: "--insecure-port"
+    value: "8080"
+  - option: "--token-auth-file"
+    value: "/etc/kubernetes/pki/auth"
+
+kube_network: calico
+#   - option: oidc-issuer-url
+#     value: https://dodas-iam.cloud.cnaf.infn.it/
+#   - option: oidc-client-id
+#     value: dodas-demo
+#   - option: oidc-username-claim
+#     value: email
+kube_deploy_dashboard: true 
