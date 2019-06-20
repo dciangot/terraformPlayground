@@ -7,7 +7,9 @@
 - hosts: localhost
   roles:
   - { role: 'indigo-dc.kubernetes'}
+  ignore_errors: yes
 
 - hosts: kube-node
   roles:
   - { role: 'indigo-dc.kubernetes', kube_type_of_node: 'wn'}
+  ignore_errors: yes

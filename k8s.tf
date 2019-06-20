@@ -70,6 +70,7 @@ variable "volume_size" {
 resource "openstack_compute_keypair_v2" "cluster-keypair" {
   name = "cluster-keypair"
   public_key = "${file("key.pub")}"
+  #public_key = "${file("/home/dciangot/Documents/key.pub")}"
 }
 
 resource "openstack_blockstorage_volume_v2" "volumes" {
@@ -203,7 +204,7 @@ resource "null_resource" "cluster_setup" {
 
   provisioner "local-exec" {
     #command = "sleep 90 && scp -o \"StrictHostKeyChecking no\" -i key key ubuntu@${openstack_networking_floatingip_v2.floatingip_master.0.address}:~/.ssh/id_rsa"
-    command = "sleep 20 && scp -o \"StrictHostKeyChecking no\" -i key key ubuntu@${openstack_compute_instance_v2.k8s-master.0.access_ip_v4}:~/.ssh/id_rsa"
+    command = "sleep 300 && scp -o \"StrictHostKeyChecking no\" -i key key ubuntu@${openstack_compute_instance_v2.k8s-master.0.access_ip_v4}:~/.ssh/id_rsa"
   }
 
   provisioner "local-exec" {

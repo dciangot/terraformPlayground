@@ -1,4 +1,5 @@
-priv_network_name = "net"
+priv_network_name = "k8s-private"
+#priv_network_name = "net"
 
 pub_network_name = "infn-farm"
 
