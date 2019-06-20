@@ -8,7 +8,7 @@
 
 # TODO: use modules
 variable "priv_network_name"{
-  default = "net"
+  default = "k8s-private"
   #default = "private_net"
 }
 
@@ -28,12 +28,12 @@ variable "slave_image_id" {
 }
 
 variable "master_flavor_name" {
-  default = "m1.large"
+  default = "m1.medium"
   #default = "2cpu-4GB.dodas"
 }
 
 variable "slave_flavor_name" {
-  default = "m1.large"
+  default = "m1.medium"
   #default = "2cpu-4GB.dodas"
 }
 
@@ -50,18 +50,18 @@ variable "n_external_volumes" {
 }
 
 variable "volume_size" {
-  default = 50
+  default = 2
 }
 
 # GET keys previously generated
 resource "openstack_compute_keypair_v2" "cluster-keypair" {
-  name = "cluster-keypair"
+  name = "cluster-spray-keypair"
   public_key = "${file("key.pub")}"
 }
 
 resource "openstack_blockstorage_volume_v2" "volumes" {
   count = "${var.n_external_volumes}"
-  name        = "cache-${count.index}"
+  name        = "cache-spray-${count.index}"
   size        = "${var.volume_size}"
 }
 
@@ -72,7 +72,7 @@ resource "openstack_networking_floatingip_v2" "floatingip_master" {
 
 # TODO: volumes e security groups
 resource "openstack_compute_secgroup_v2" "secgroup_k8s" {
-  name        = "secgroup_k8s"
+  name        = "secgroup_spray-k8s"
   description = "security group for k8s with terraform"
 
   rule {
@@ -100,7 +100,7 @@ resource "openstack_compute_secgroup_v2" "secgroup_k8s" {
 }
 
 resource "openstack_compute_instance_v2" "k8s-master" {
-  count = 2
+  count = 1
   name      = "master-${count.index}"
   image_id  = "${var.master_image_id}"
   flavor_name = "${var.master_flavor_name}"
@@ -151,7 +151,8 @@ resource "openstack_compute_floatingip_associate_v2" "floatingip_master" {
 resource "null_resource" "mount_volumes" {
   count = var.mount_volumes
   triggers = {
-    attach = "${openstack_compute_volume_attach_v2.attachments.0.id}"
+    #attach = "${openstack_compute_volume_attach_v2.attachments.0.id}"
+    attach = "${null_resource.cluster_setup.id}"
   }
 
   provisioner "file" {
@@ -195,7 +196,7 @@ resource "null_resource" "cluster_setup" {
 
   provisioner "local-exec" {
     #command = "scp -o \"StrictHostKeyChecking no\" -i key key.pub ubuntu@${openstack_networking_floatingip_v2.floatingip_master.0.address}:~/.ssh/id_rsa.pub"
-    command = "sleep 90 && scp -o \"StrictHostKeyChecking no\" -i key key ubuntu@${openstack_compute_instance_v2.k8s-master.0.access_ip_v4}:~/.ssh/id_rsa.pub"
+    command = "scp -o \"StrictHostKeyChecking no\" -i key key ubuntu@${openstack_compute_instance_v2.k8s-master.0.access_ip_v4}:~/.ssh/id_rsa.pub"
   }
 
   provisioner "file" {
