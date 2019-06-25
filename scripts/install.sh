@@ -1,6 +1,6 @@
 #!/bin/bash
 sudo apt update 
-sudo apt upgrade -y
+yes N | sudo apt upgrade -y
 export LC_ALL=C
 
 sudo apt install -y  build-essential python3 python3-pip python3-dev libffi-dev git

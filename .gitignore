@@ -1,4 +1,6 @@
+*.tfstate
 *.tfstate*
+*.tfvars
 .terraform
 openrc*
 key*

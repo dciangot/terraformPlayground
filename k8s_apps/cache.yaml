@@ -1,0 +1,314 @@
+---
+# Source: cachingondemand/templates/k8s_template.yml
+kind: Service
+apiVersion: v1
+metadata:
+  name: xcache-server-service
+spec:
+  type: ClusterIP 
+  selector:
+    app: xcache
+  ports:
+  - protocol: TCP
+    name: xrootd
+    port: 31494
+    targetPort: 32294
+  - protocol: TCP
+    name: cmsd
+    port: 31113
+    targetPort: 31113
+  # TODO: integrate auth
+  - protocol: TCP
+    name: http
+    port: 31800
+    targetPort: 8080
+
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: xcache-redir-service
+spec:
+  type: ClusterIP 
+  selector:
+    app: xredir
+  ports:
+  - protocol: TCP
+    name: xrootd
+    port: 31294
+    targetPort: 1094
+  - protocol: TCP
+    name: cmsd
+    port: 31213
+    targetPort: 31213
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: xcache-proxy
+spec:
+  type: ClusterIP
+  selector:
+    app: proxy
+  ports:
+  - protocol: TCP
+    name: xrootd
+    port: 31394
+    targetPort: 32294
+  externalIPs:
+  - "193.204.89.105"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: xredir-pod
+  labels:
+    app: xredir
+spec:
+  template:
+    metadata:
+      labels:
+        app: xredir
+    spec:
+      containers:
+      - name: redirector
+        imagePullPolicy: Always
+        args:
+        - --nogrid
+        - --redirector
+        - --health_port
+        - "8080"
+        env:
+        - name: REDIR_CMSD_PORT
+          value: "31213"
+        - name: REDIR_HOST
+          value: "xcache-redir-service.default.svc.cluster.local" 
+        - name: REDIR_XRD_PORT
+          value: "1094"
+        image: "cloudpg/cachingondemand:helm-demo" 
+        livenessProbe:
+          exec:
+            command:
+            - curl
+            - -f
+            - http://localhost:8080/check_health
+        ports:
+        - containerPort: 1094
+        - containerPort: 31213
+
+  selector:
+    matchLabels:
+      app: xredir
+
+  replicas: 1
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: proxy-pod
+  labels:
+    app: proxy
+spec:
+  template:
+    metadata:
+      labels:
+        app: proxy
+    spec:
+      volumes:
+      - name: xcache-creds
+        hostPath:
+          path: /tmp
+      - name: vomses
+        configMap:
+          name: vomses-config
+      - name: certs
+        secret:
+          secretName: certs
+          defaultMode: 256
+      containers:
+      - name: cache
+        imagePullPolicy: Always
+        args:
+        - --proxy
+        - --health_port
+        - "8088"
+        env:
+        - name: BLOCK_SIZE
+          value: "512k"
+        - name: CACHE_LOG_LEVEL
+          value: "info"
+        - name: CACHE_PATH
+          value: /data/xrd
+        - name: CACHE_RAM_GB
+          value: "2"
+        - name: HI_WM
+          value: "0.95"
+        - name: LOW_WM
+          value: "0.8"
+        - name: N_PREFETCH
+          value: "1"
+        - name: ORIGIN_HOST
+          value: "xcache-redir-service.default.svc.cluster.local"
+        - name: ORIGIN_XRD_PORT
+          value: "31294"
+        - name: REDIR_CMSD_PORT
+          value: "31113"
+        - name: REDIR_HOST
+          value: "0.0.0.0"
+        - name: STREAMS
+          value: "256"
+        image: "cloudpg/cachingondemand:helm-demo"
+        volumeMounts:
+        - mountPath: /data/xrd
+          name: xcache-data
+        ## WAITING FOR CMS VOMS TTS solution
+        - mountPath: /tmp/
+          name: xcache-creds
+        - name: certs
+          mountPath: "/etc/grid-security/xrd/cert"
+          readOnly: true
+        ports:
+        - containerPort: 32294
+
+      - name: renew
+        args:
+          - --renew
+          - --vo 
+          - "cms"
+        imagePullPolicy: Always
+        image: "cloudpg/cachingondemand:helm-demo"
+        volumeMounts:
+        - name: xcache-creds
+          mountPath: /tmp/
+        - name: vomses
+          mountPath: /etc/vomses
+        - name: certs
+          mountPath: "/etc/grid-security/xrd/cert"
+          readOnly: true
+
+
+  selector:
+    matchLabels:
+      app: proxy
+
+  replicas: 1
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: xcache-pod
+  labels:
+    app: xcache
+spec:
+  template:
+    metadata:
+      labels:
+        app: xcache
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - xcache
+            topologyKey: "kubernetes.io/hostname"
+      volumes:
+      - name: xcache-data
+        hostPath:
+          path: /mnt/xrd
+      - name: xcache-creds
+        hostPath:
+          path: /tmp
+      - name: vomses
+        configMap:
+          name: vomses-config
+      - name: certs
+        secret:
+          secretName: certs
+          defaultMode: 256
+      containers:
+      - name: cache
+        imagePullPolicy: Always
+        args:
+        - --proxy
+        - --nogsi
+        - --health_port
+        - "8088"
+        env:
+        - name: BLOCK_SIZE
+          value: "512k"
+        - name: CACHE_LOG_LEVEL
+          value: "info"
+        - name: CACHE_PATH
+          value: /data/xrd
+        - name: CACHE_RAM_GB
+          value: "2"
+        - name: HI_WM
+          value: "0.95"
+        - name: LOW_WM
+          value: "0.8"
+        - name: N_PREFETCH
+          value: "1"
+        - name: ORIGIN_HOST
+          value: "xrootd-cms.infn.it"
+        - name: ORIGIN_XRD_PORT
+          value: "1094"
+        - name: REDIR_CMSD_PORT
+          value: "31213"
+        - name: REDIR_HOST
+          value: "xcache-redir-service.default.svc.cluster.local"
+        - name: STREAMS
+          value: "256"
+        image: "cloudpg/cachingondemand:helm-demo"
+        volumeMounts:
+        - mountPath: /data/xrd
+          name: xcache-data
+        ## WAITING FOR CMS VOMS TTS solution
+        - mountPath: /tmp/
+          name: xcache-creds
+        - name: certs
+          mountPath: "/etc/grid-security/xrd/cert"
+          readOnly: true
+        ports:
+        - containerPort: 32294
+        - containerPort: 31113
+        - containerPort: 8080
+
+      ## WAITING FOR VOMS TTS solution
+      - name: renew
+        args:
+          - --renew
+          - --vo 
+          - "cms"
+        imagePullPolicy: Always
+        image: "cloudpg/cachingondemand:helm-demo"
+        volumeMounts:
+        - name: xcache-creds
+          mountPath: /tmp/
+        - name: vomses
+          mountPath: /etc/vomses
+        - name: certs
+          mountPath: "/etc/grid-security/xrd/cert"
+          readOnly: true
+
+
+      #   livenessProbe:
+      #     exec:
+      #       command:
+      #       - curl
+      #       - -f
+      #       - http://localhost:8888/check_health
+      #     initialDelaySeconds: 300
+      #     periodSeconds: 60
+
+  selector:
+    matchLabels:
+      app: xcache
+
+  replicas: 1

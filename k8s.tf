@@ -33,7 +33,7 @@ variable "master_flavor_name" {
 }
 
 variable "slave_flavor_name" {
-  default = "m1.medium"
+  default = "m1.large"
   #default = "2cpu-4GB.dodas"
 }
 
@@ -50,8 +50,14 @@ variable "n_external_volumes" {
 }
 
 variable "volume_size" {
-  default = 2
+  default = 30
 }
+
+# TODO
+#data "openstack_compute_flavor_v2" "slave" {
+#  vcpus = "${var.slave_ncpus}"
+#  ram   = "${var.slave_ram}"
+#}
 
 # GET keys previously generated
 resource "openstack_compute_keypair_v2" "cluster-keypair" {
@@ -100,7 +106,7 @@ resource "openstack_compute_secgroup_v2" "secgroup_k8s" {
 }
 
 resource "openstack_compute_instance_v2" "k8s-master" {
-  count = 1
+  count = 2
   name      = "master-${count.index}"
   image_id  = "${var.master_image_id}"
   flavor_name = "${var.master_flavor_name}"
@@ -131,7 +137,8 @@ resource "openstack_compute_instance_v2" "k8s-nodes" {
   }
 
   depends_on = [
-    openstack_compute_instance_v2.k8s-master
+    openstack_compute_instance_v2.k8s-master,
+    openstack_blockstorage_volume_v2.volumes
     ]
 }
 
