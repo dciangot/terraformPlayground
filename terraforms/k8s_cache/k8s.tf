@@ -8,49 +8,50 @@
 
 # TODO: use modules
 variable "priv_network_name"{
-  default = "k8s-private"
+  #default = "k8s-private"
   #default = "private_net"
 }
 
 variable "pub_network_name"{
-  default = "infn-farm"
+  #default = "infn-farm"
   #default = "public_net"
 }
 
 variable "master_image_id" {
-  default = "cb87a2ac-5469-4bd5-9cce-9682c798b4e4"
+  #default = "cb87a2ac-5469-4bd5-9cce-9682c798b4e4"
   #default = "8f667fbc-40bf-45b8-b22d-40f05b48d060"
 }
 
 variable "slave_image_id" {
-  default = "d9a41aed-3ebf-42f9-992e-ef0078d3de95"
+  #default = "d9a41aed-3ebf-42f9-992e-ef0078d3de95"
   #default = "8f667fbc-40bf-45b8-b22d-40f05b48d060"
 }
 
 variable "master_flavor_name" {
-  default = "m1.medium"
+  #default = "m1.medium"
   #default = "2cpu-4GB.dodas"
 }
 
 variable "slave_flavor_name" {
-  default = "m1.large"
+  #default = "m1.large"
   #default = "2cpu-4GB.dodas"
 }
 
 variable "n_slaves" {
-  default = 2
+  #default = 2
 }
 
 variable "mount_volumes" {
-  default = 1
+  #default = 1
+  description = "Do you want to bind external volumes? (yes:1 no:0)"
 }
 
 variable "n_external_volumes" {
-  default = 2
+  default = "${var.n_slaves}"
 }
 
 variable "volume_size" {
-  default = 30
+  #default = 30
 }
 
 # TODO
@@ -269,6 +270,38 @@ resource "null_resource" "ansible" {
       "sudo helm init --upgrade",
       "sudo helm repo add cloudpg https://cloud-pg.github.io/CachingOnDemand/",
       "sudo helm repo update"
+    ]
+    connection {
+      type     = "ssh"
+      user     = "ubuntu"
+      #host = "${openstack_networking_floatingip_v2.floatingip_master.0.address}"
+      host = "${openstack_compute_instance_v2.k8s-master.0.access_ip_v4}"
+      private_key = "${file("key")}"
+  }
+  }
+}
+
+resource "null_resource" "kustomize" {
+
+  triggers = {
+    floating_ip = "${null_resource.ansible.id}"
+  }
+
+  provisioner "file" {
+    source      = "tasks/kustomize.yaml"
+    destination = "/tmp/kustomize.yaml"
+    connection {
+      type     = "ssh"
+      user     = "ubuntu"
+      #host = "${openstack_networking_floatingip_v2.floatingip_master.0.address}"
+      host = "${openstack_compute_instance_v2.k8s-master.0.access_ip_v4}"
+      private_key = "${file("key")}"
+    }
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "ansible-playbook --become --become-user=root --extra-vars \"pub_ip=${openstack_compute_instance_v2.k8s-master.0.access_ip_v4}\" /tmp/kustomize.yml",
     ]
     connection {
       type     = "ssh"
